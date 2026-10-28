@@ -11,16 +11,7 @@ export default async function StudentsPage({
 }) {
   const params = await searchParams;
   const query = readParam(params.q, "");
-  const department = readParam(params.department);
-  const semester = readParam(params.semester);
-  const risk = readParam(params.risk);
   return (
-    <StudentsView
-      key={`${query}|${department}|${semester}|${risk}`}
-      initialQuery={query}
-      initialDepartment={department}
-      initialSemester={semester}
-      initialRisk={risk}
-    />
+    <StudentsView key={query} initialQuery={query} />
   );
 }

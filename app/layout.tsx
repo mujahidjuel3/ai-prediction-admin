@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     template: "%s | Academic Sentinel",
   },
   description:
-    "Administration workspace for the student performance and early warning demonstration.",
+    "Academic Sentinel administration workspace for academic records and early-warning workflows.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

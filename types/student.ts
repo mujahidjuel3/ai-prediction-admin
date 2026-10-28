@@ -38,6 +38,19 @@ export interface StudentInput {
   midtermScore: number;
 }
 
+export interface StudentProfileProvisioningFields {
+  studentNumber: string;
+  name: string;
+  departmentId: string;
+  enrollmentYear: number;
+}
+
+export type StudentAccountProvisioning =
+  | { accountMode: "CREATE"; email: string; initialPassword: string }
+  | { accountMode: "LINK"; userId: string };
+
+export type CreateStudentProfileRequest = StudentProfileProvisioningFields & StudentAccountProvisioning;
+
 export interface StudentCourseRow {
   courseId: string;
   courseCode: string;

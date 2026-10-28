@@ -1,254 +1,26 @@
-"use client";
+﻿"use client";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { DemoNotice } from "@/components/ui/demo-notice";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Feedback } from "@/components/ui/feedback";
+import { ErrorState } from "@/components/ui/error-state";
 import { Input } from "@/components/ui/input";
 import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
-import { Pagination } from "@/components/ui/pagination";
 import { Select } from "@/components/ui/select";
-import { Badge } from "@/components/ui/badge";
-import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { usePagination } from "@/hooks/use-pagination";
-import {
-  RECORD_IMPORT_TEMPLATE,
-  buildRecordImport,
-  downloadCsv,
-  parseCsv,
-  type ImportPreviewRow,
-} from "@/lib/csv";
-import { recordRows } from "@/lib/selectors";
-import { importRecords, useAdminState } from "@/lib/store";
-import { includesQuery, selectedOrAll, semesterOptions } from "@/lib/utils";
-import { isRecordInput } from "@/lib/validation";
-import { useMemo, useState } from "react";
+import { apiGet, apiPost, apiRequest } from "@/lib/api";
+import { useApiList } from "@/lib/use-api-list";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
 
-export function RecordsView() {
-  const state = useAdminState();
-  const rows = recordRows(state);
-  const [query, setQuery] = useState("");
-  const [department, setDepartment] = useState("all");
-  const [semester, setSemester] = useState("all");
-  const [reading, setReading] = useState(false);
-  const [importError, setImportError] = useState("");
-  const [preview, setPreview] = useState<ImportPreviewRow[] | null>(null);
-  const [message, setMessage] = useState("");
-  const departmentId = selectedOrAll(department, state.departments.map((item) => item.id));
+interface Preview { jobId:string;totalRows:number;validRows:number;errorCount:number;rows:{line:number;valid:boolean;errors:string[]}[]; }
+export function RecordsView(){const[file,setFile]=useState<File|null>(null);const[preview,setPreview]=useState<Preview|null>(null);const[error,setError]=useState("");const[busy,setBusy]=useState(false);const[acknowledge,setAcknowledge]=useState(false);const[message,setMessage]=useState("");async function runPreview(){if(!file)return;setBusy(true);setError("");setMessage("");try{const csv=await file.text();const result=await apiRequest<Preview>("/imports/academic-records/preview",{method:"POST",headers:{"Idempotency-Key":crypto.randomUUID()},body:JSON.stringify({csv})});setPreview(result.data);}catch(cause){setError(cause instanceof Error?cause.message:"Preview failed.");}finally{setBusy(false);}}async function commit(){if(!preview)return;setBusy(true);setError("");try{const result=await apiRequest<{committedRows:number;skippedInvalidRows:number}>(`/imports/${preview.jobId}/commit`,{method:"POST",body:JSON.stringify({acknowledgeInvalidRows:acknowledge})});setMessage(`Committed ${result.data.committedRows} rows; skipped ${result.data.skippedInvalidRows} invalid rows.`);setPreview(null);setFile(null);}catch(cause){setError(cause instanceof Error?cause.message:"Commit failed.");}finally{setBusy(false);}}return <div className="space-y-6"><div className="space-y-4"><PageHeader title="Academic records" description="Attendance and assessment records are written only through authorized API operations. CSV import uses the API's validation preview and commit flow."/><Card><CardHeader><CardTitle>CSV import preview</CardTitle><CardDescription>Required headers: student_number, course_code, term_code, section, record_type, record_date, attendance_status, assessment_name, assessment_kind, max_score, weight, score.</CardDescription></CardHeader><CardContent className="space-y-3"><Input id="csv-file" label="CSV file" type="file" accept=".csv,text/csv" onChange={(event)=>{setFile(event.target.files?.[0]??null);setPreview(null);setError("");}}/><Button disabled={!file||busy} onClick={()=>void runPreview()}>{busy?"Workingâ€¦":"Validate preview"}</Button>{error?<p role="alert" className="text-sm text-danger">{error}</p>:null}{message?<p role="status" className="text-sm text-slate-700">{message}</p>:null}</CardContent></Card>{preview?<Card><CardHeader><CardTitle>Server validation preview</CardTitle><CardDescription>{preview.totalRows} rows Â· {preview.validRows} valid Â· {preview.errorCount} errors Â· job {preview.jobId}</CardDescription></CardHeader><CardContent className="space-y-3"><div className="max-h-80 overflow-auto"><table className="w-full text-left text-sm"><thead><tr><th className="py-2">Line</th><th>Status</th><th>Validation messages</th></tr></thead><tbody>{preview.rows.map((row)=><tr key={row.line} className="border-t"><td className="py-2">{row.line}</td><td>{row.valid?"Valid":"Invalid"}</td><td>{row.errors.join("; ")||"â€”"}</td></tr>)}</tbody></table></div>{preview.errorCount>0?<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={acknowledge} onChange={(event)=>setAcknowledge(event.target.checked)}/>I acknowledge invalid rows will be skipped; only valid preview rows will be committed.</label>:null}<Button disabled={busy||preview.validRows===0||(preview.errorCount>0&&!acknowledge)} onClick={()=>void commit()}>Commit {preview.validRows} valid rows</Button></CardContent></Card>:null}</div><AcademicRecordOperations/></div>}
 
-  const filtered = useMemo(
-    () =>
-      rows.filter((record) => {
-        const matchesQuery = includesQuery(query, [
-          record.studentName,
-          record.publicStudentId,
-          record.courseName,
-          record.courseCode,
-        ]);
-        const matchesDepartment = departmentId === "all" || record.departmentId === departmentId;
-        const matchesSemester = semester === "all" || record.semester === Number(semester);
-        return matchesQuery && matchesDepartment && matchesSemester;
-      }),
-    [rows, query, departmentId, semester],
-  );
-  const pagination = usePagination(filtered, state.settings.system.pageSize);
-  const validRows = preview?.filter((row) => isRecordInput(row.record)) ?? [];
+interface Offering {id:string;section:string;course:{code:string;name:string};term:{label:string};}
+interface Enrollment {student:{id:string;studentNumber:string;name:string};}
+interface Assessment {id:string;name:string;kind:string;maxScore:string|number;weight:number|null;_count:{scores:number};}
+interface Attendance {id:string;sessionDate:string;status:string;student:{studentNumber:string;name:string};}
+interface Score {id:string;score:number|string|null;student:{studentNumber:string;name:string};}
+function AcademicRecordOperations(){const{items:offerings,loading:offeringsLoading,error:offeringsError}=useApiList<Offering>("/courses");const[offeringId,setOfferingId]=useState("");const[enrollments,setEnrollments]=useState<Enrollment[]>([]);const[assessments,setAssessments]=useState<Assessment[]>([]);const[attendance,setAttendance]=useState<Attendance[]>([]);const[scores,setScores]=useState<Score[]>([]);const[assessmentId,setAssessmentId]=useState("");const[studentId,setStudentId]=useState("");const[status,setStatus]=useState("PRESENT");const[sessionDate,setSessionDate]=useState(new Date().toISOString().slice(0,10));const[scoreInputs,setScoreInputs]=useState<Record<string,string>>({});const[assessment,setAssessment]=useState({name:"",kind:"",maxScore:"100",weight:""});const[message,setMessage]=useState("");const[error,setError]=useState("");const[busy,setBusy]=useState(false);const refresh=useCallback(async()=>{if(!offeringId)return;try{const[en,as,at]=await Promise.all([apiGet<Enrollment[]>(`/offerings/${offeringId}/enrollments`),apiGet<Assessment[]>(`/offerings/${offeringId}/assessments`),apiGet<Attendance[]>(`/attendance?offeringId=${encodeURIComponent(offeringId)}`)]);setEnrollments(en.data);setAssessments(as.data);setAttendance(at.data);}catch(cause){setError(cause instanceof Error?cause.message:"Unable to load academic records.");}},[offeringId]);useEffect(()=>{const timer=window.setTimeout(()=>{void refresh();},0);return()=>window.clearTimeout(timer);},[refresh]);useEffect(()=>{if(assessmentId){const timer=window.setTimeout(()=>{void apiGet<Score[]>(`/assessments/${assessmentId}/scores`).then((r)=>setScores(r.data)).catch((cause)=>setError(cause instanceof Error?cause.message:"Unable to load scores."));},0);return()=>window.clearTimeout(timer);}},[assessmentId]);async function saveAttendance(event:FormEvent<HTMLFormElement>){event.preventDefault();setBusy(true);setError("");try{await apiPost("/attendance",{studentId,offeringId,sessionDate,status});setMessage("Attendance saved to the database.");await refresh();}catch(cause){setError(cause instanceof Error?cause.message:"Unable to save attendance.");}finally{setBusy(false);}}async function createAssessment(event:FormEvent<HTMLFormElement>){event.preventDefault();setBusy(true);setError("");try{const result=await apiPost<Assessment>("/assessments",{offeringId,...assessment,maxScore:Number(assessment.maxScore),...(assessment.weight?{weight:Number(assessment.weight)}:{})});setAssessmentId(result.data.id);setAssessment({name:"",kind:"",maxScore:"100",weight:""});setMessage("Assessment created in the database.");await refresh();}catch(cause){setError(cause instanceof Error?cause.message:"Unable to create assessment.");}finally{setBusy(false);}}async function saveScores(event:FormEvent<HTMLFormElement>){event.preventDefault();const rows=Object.entries(scoreInputs).filter(([,value])=>value!=="").map(([student,score])=>({studentId:student,score:Number(score)}));if(!assessmentId||!rows.length)return;setBusy(true);setError("");try{await apiPost("/assessment-scores/batch",{assessmentId,scores:rows});setMessage("Scores saved to the database.");setScoreInputs({});const result=await apiGet<Score[]>(`/assessments/${assessmentId}/scores`);setScores(result.data);await refresh();}catch(cause){setError(cause instanceof Error?cause.message:"Unable to save scores.");}finally{setBusy(false);}}return <section className="space-y-4"><div><h2 className="text-lg font-semibold">Attendance, assessments, and scores</h2><p className="text-sm text-slate-600">Values are written through existing validated endpoints and must follow institutional policy.</p></div>{offeringsLoading?<LoadingState label="Loading course offerings"/>:offeringsError?<ErrorState description={offeringsError}/>:offerings.length===0?<EmptyState title="No course offerings" description="Create a course offering before recording attendance or assessments."/>:<><Select label="Offering" value={offeringId} onChange={(event)=>{setOfferingId(event.target.value);setAssessmentId("");setStudentId("");}} options={[{label:"Select an offering",value:""},...offerings.map((o)=>({label:`${o.course.code} Â· ${o.term.label} Â· Section ${o.section}`,value:o.id}))]}/>{offeringId?<><Card><CardHeader><CardTitle>Record attendance</CardTitle></CardHeader><CardContent><form onSubmit={(event)=>void saveAttendance(event)} className="grid gap-3 sm:grid-cols-4"><Select label="Enrolled student" value={studentId} onChange={(event)=>setStudentId(event.target.value)} options={[{label:"Select student",value:""},...enrollments.map((e)=>({label:`${e.student.studentNumber} Â· ${e.student.name}`,value:e.student.id}))]}/><Input label="Session date" type="date" value={sessionDate} onChange={(event)=>setSessionDate(event.target.value)} required/><Select label="Status" value={status} onChange={(event)=>setStatus(event.target.value)} options={["PRESENT","ABSENT","LATE","EXCUSED"].map((s)=>({label:s,value:s}))}/><Button type="submit" disabled={busy||!studentId}>Save attendance</Button></form><ul className="mt-4 divide-y">{attendance.map((item)=><li key={item.id} className="py-2 text-sm">{item.sessionDate.slice(0,10)} Â· {item.student.studentNumber} Â· {item.student.name} Â· {item.status}</li>)}</ul></CardContent></Card><Card><CardHeader><CardTitle>Create assessment</CardTitle></CardHeader><CardContent><form onSubmit={(event)=>void createAssessment(event)} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><Input label="Assessment name" value={assessment.name} onChange={(event)=>setAssessment({...assessment,name:event.target.value})} required/><Input label="Kind" value={assessment.kind} onChange={(event)=>setAssessment({...assessment,kind:event.target.value})} required/><Input label="Maximum score" type="number" min="0.01" step="0.01" value={assessment.maxScore} onChange={(event)=>setAssessment({...assessment,maxScore:event.target.value})} required/><Input label="Weight (optional)" type="number" min="0" max="100" step="0.001" value={assessment.weight} onChange={(event)=>setAssessment({...assessment,weight:event.target.value})}/><Button type="submit" disabled={busy}>Create assessment</Button></form></CardContent></Card><Card><CardHeader><CardTitle>Assessment scores</CardTitle></CardHeader><CardContent className="space-y-3"><Select label="Assessment" value={assessmentId} onChange={(event)=>setAssessmentId(event.target.value)} options={[{label:"Select assessment",value:""},...assessments.map((a)=>({label:`${a.name} (${a._count.scores} stored scores)`,value:a.id}))]}/>{assessmentId?<form onSubmit={(event)=>void saveScores(event)} className="space-y-2">{enrollments.map((e)=><Input key={e.student.id} label={`${e.student.studentNumber} Â· ${e.student.name}`} type="number" min="0" step="0.01" value={scoreInputs[e.student.id]??""} onChange={(event)=>setScoreInputs({...scoreInputs,[e.student.id]:event.target.value})}/>)}<Button type="submit" disabled={busy||Object.values(scoreInputs).every((v)=>!v)}>Save entered scores</Button><ul className="divide-y">{scores.map((score)=><li key={score.id} className="py-2 text-sm">{score.student.studentNumber} Â· {score.student.name} Â· {score.score??"No score"}</li>)}</ul></form>:null}</CardContent></Card></>:null}</>}{error?<p role="alert" className="text-sm text-danger">{error}</p>:null}{message?<p role="status" className="text-sm">{message}</p>:null}</section>}
 
-  async function onFile(file: File | undefined) {
-    setMessage("");
-    setImportError("");
-    setPreview(null);
-    if (!file) return;
-    const type = file.type.toLowerCase();
-    const csvType = type === "" || type === "text/csv" || type === "application/vnd.ms-excel";
-    if (!file.name.toLowerCase().endsWith(".csv") || !csvType) {
-      setImportError("Only CSV files can be imported in this demonstration.");
-      return;
-    }
-    if (file.size > 1_000_000) {
-      setImportError("The file is larger than 1 MB.");
-      return;
-    }
-    setReading(true);
-    try {
-      const text = await file.text();
-      const result = buildRecordImport(text, state);
-      if (result.error) setImportError(result.error);
-      else setPreview(result.rows);
-    } catch {
-      setImportError("The file could not be read.");
-    } finally {
-      setReading(false);
-    }
-  }
 
-  function downloadTemplate() {
-    const saved = downloadCsv("academic-records-template.csv", parseCsv(RECORD_IMPORT_TEMPLATE));
-    setMessage(
-      saved
-        ? "Downloaded academic-records-template.csv."
-        : "The template download could not be started.",
-    );
-  }
 
-  function acceptImport() {
-    const records = validRows.flatMap((row) => (row.record ? [row.record] : []));
-    const result = importRecords(records);
-    if (!result.ok) {
-      setImportError(result.message);
-      return;
-    }
-    const skipped = (preview?.length ?? 0) - records.length;
-    setPreview(null);
-    setMessage(
-      skipped > 0
-        ? `Imported ${records.length} valid row${records.length === 1 ? "" : "s"} into this demonstration session. ${skipped} row${skipped === 1 ? " was" : "s were"} skipped. Nothing was written to a database.`
-        : `Imported ${records.length} row${records.length === 1 ? "" : "s"} into this demonstration session. Nothing was written to a database.`,
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      <PageHeader
-        title="Academic records"
-        description="Attendance and assessment marks linked to students and courses in this session."
-        actions={<Button variant="outline" onClick={downloadTemplate}>Download CSV template</Button>}
-      />
-      <Feedback message={message} />
-      <DemoNotice>
-        CSV import updates this browser session only. The sample template row will update Rahim Ahmed&apos;s Data Structures record if you accept the preview.
-      </DemoNotice>
-      <Card>
-        <CardHeader>
-          <CardTitle>Import CSV</CardTitle>
-          <CardDescription>
-            Required columns: student_id, course_code, attendance, assignment, quiz, midterm, final, semester.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <input
-            type="file"
-            accept=".csv,text/csv"
-            aria-label="CSV file"
-            className="block w-full text-sm text-slate-600 file:mr-3 file:h-10 file:rounded-md file:border-0 file:bg-slate-900 file:px-3 file:text-sm file:font-medium file:text-white"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              void onFile(file);
-              event.target.value = "";
-            }}
-          />
-          {importError ? <p role="alert" className="text-sm text-danger">{importError}</p> : null}
-          {reading ? <LoadingState label="Reading CSV file" /> : null}
-          {preview ? (
-            <div className="space-y-3">
-              <p className="text-sm text-slate-600">
-                {validRows.length} valid of {preview.length} rows. Review the preview before accepting.
-              </p>
-              <div className="max-h-80 overflow-auto rounded-md border border-slate-200">
-                <table className="w-full min-w-[760px] text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-500">
-                    <tr>
-                      {["Line", "Student", "Course", "Marks", "Semester", "Result"].map((heading) => (
-                        <th key={heading} className="px-3 py-2 font-medium">{heading}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {preview.map((row) => (
-                      <tr key={`${row.line}-${row.studentLabel}-${row.courseLabel}`}>
-                        <td className="px-3 py-2">{row.line}</td>
-                        <td className="px-3 py-2">{row.studentLabel || "—"}</td>
-                        <td className="px-3 py-2">{row.courseLabel || "—"}</td>
-                        <td className="px-3 py-2">{row.attendance}/{row.assignment}/{row.quiz}/{row.midterm}/{row.finalMark}</td>
-                        <td className="px-3 py-2">{row.semester}</td>
-                        <td className="px-3 py-2">
-                          {row.errors.length > 0 ? (
-                            <span className="text-danger">{row.errors.join(" ")}</span>
-                          ) : (
-                            <Badge variant={row.mode === "update" ? "warning" : "success"}>
-                              {row.mode === "update" ? "Will update" : "Will add"}
-                            </Badge>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Button onClick={acceptImport} disabled={validRows.length === 0}>
-                  Accept {validRows.length} valid row{validRows.length === 1 ? "" : "s"}
-                </Button>
-                <Button variant="outline" onClick={() => setPreview(null)}>Discard preview</Button>
-              </div>
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
-
-      <Card className="p-4">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <Input id="record-search" label="Search" placeholder="Student or course" value={query} onChange={(event) => { setQuery(event.target.value); pagination.setPage(1); }} />
-          <Select id="record-department" label="Department" value={departmentId} onChange={(event) => { setDepartment(event.target.value); pagination.setPage(1); }} options={[{ label: "All departments", value: "all" }, ...state.departments.map((item) => ({ label: item.code, value: item.id }))]} />
-          <Select id="record-semester" label="Semester" value={semester} onChange={(event) => { setSemester(event.target.value); pagination.setPage(1); }} options={semesterOptions(true)} />
-        </div>
-      </Card>
-      <Card>
-        {filtered.length === 0 ? (
-          <EmptyState title="No academic records match" description="Adjust the filters or import a CSV preview." />
-        ) : (
-          <>
-            <div className="hidden lg:block">
-              <Table className="min-w-[980px]">
-                <caption className="sr-only">Academic records</caption>
-                <THead>
-                  <TR>
-                    <TH>Student</TH><TH>Course</TH><TH>Attendance</TH><TH>Assignment</TH><TH>Quiz</TH><TH>Midterm</TH><TH>Final</TH><TH>Semester</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {pagination.pagedItems.map((record) => (
-                    <TR key={record.id}>
-                      <TD>
-                        <p className="font-medium text-slate-900">{record.studentName}</p>
-                        <p className="text-xs text-slate-500">{record.publicStudentId}</p>
-                      </TD>
-                      <TD>
-                        <p>{record.courseName}</p>
-                        <p className="text-xs text-slate-500">{record.courseCode}</p>
-                      </TD>
-                      <TD>{record.attendance}</TD>
-                      <TD>{record.assignment}</TD>
-                      <TD>{record.quiz}</TD>
-                      <TD>{record.midterm}</TD>
-                      <TD>{record.finalMark}</TD>
-                      <TD>{record.semester}</TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-            </div>
-            <div className="space-y-3 p-4 lg:hidden">
-              {pagination.pagedItems.map((record) => (
-                <article key={record.id} className="rounded-lg border border-slate-200 p-3 text-sm">
-                  <p className="font-medium text-slate-900">{record.studentName}</p>
-                  <p className="text-xs text-slate-500">{record.publicStudentId} · {record.courseCode} · Semester {record.semester}</p>
-                  <dl className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500">
-                    <div><dt>Attendance</dt><dd className="font-medium text-slate-900">{record.attendance}</dd></div>
-                    <div><dt>Assignment</dt><dd className="font-medium text-slate-900">{record.assignment}</dd></div>
-                    <div><dt>Quiz</dt><dd className="font-medium text-slate-900">{record.quiz}</dd></div>
-                    <div><dt>Midterm</dt><dd className="font-medium text-slate-900">{record.midterm}</dd></div>
-                    <div><dt>Final</dt><dd className="font-medium text-slate-900">{record.finalMark}</dd></div>
-                  </dl>
-                </article>
-              ))}
-            </div>
-            <Pagination {...pagination} onPageChange={pagination.setPage} />
-          </>
-        )}
-      </Card>
-    </div>
-  );
-}

@@ -18,3 +18,15 @@ export interface TeacherInput {
   departmentId: string;
   status: TeacherStatus;
 }
+
+export interface TeacherProfileProvisioningFields {
+  employeeNumber: string;
+  name: string;
+  departmentId: string;
+}
+
+export type TeacherAccountProvisioning =
+  | { accountMode: "CREATE"; email: string; initialPassword: string }
+  | { accountMode: "LINK"; userId: string };
+
+export type CreateTeacherProfileRequest = TeacherProfileProvisioningFields & TeacherAccountProvisioning;

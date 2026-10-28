@@ -3,13 +3,12 @@
 import { useOverlay } from "@/hooks/use-overlay";
 import { APP_NAME } from "@/lib/constants";
 import { isActivePath, NAV_GROUPS } from "@/lib/nav";
-import { useAdminState } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { Avatar } from "@/components/ui/avatar";
 import { GraduationCap, LogOut, X } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
+import { SessionIdentity } from "@/components/auth/session-identity";
 
 interface SidebarProps {
   open: boolean;
@@ -18,7 +17,6 @@ interface SidebarProps {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const state = useAdminState();
   const ref = useRef<HTMLElement>(null);
   const [viewport, setViewport] = useState<"unknown" | "mobile" | "desktop">("unknown");
 
@@ -64,7 +62,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
             <span className="min-w-0 leading-tight">
               <span className="block truncate text-sm font-semibold text-slate-900">{APP_NAME}</span>
               <span className="block truncate text-[11px] text-slate-500">
-                {state.settings.system.institutionName}
+                Local administration
               </span>
             </span>
           </Link>
@@ -114,15 +112,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         </nav>
 
         <div className="border-t border-slate-100 p-4">
-          <div className="flex items-center gap-3">
-            <Avatar name={state.settings.profile.name} size="sm" />
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-slate-900">
-                {state.settings.profile.name}
-              </p>
-              <p className="truncate text-xs text-slate-500">{state.settings.profile.title}</p>
-            </div>
-          </div>
+          <SessionIdentity />
           <Link
             href="/signed-out"
             className="mt-3 flex min-h-10 w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-slate-600 hover:bg-slate-50"

@@ -6,7 +6,7 @@ export default function AdminNotFound() {
   return (
     <EmptyState
       title="Page not found"
-      description="The administration record or route you requested is not available in this demonstration."
+      description="The administration record or route you requested was not found."
       action={
         <Link href="/dashboard" className={buttonClassName("primary", "sm")}>
           Back to dashboard

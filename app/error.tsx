@@ -16,7 +16,7 @@ export default function RootError({
         description={
           error.digest
             ? `Try again. Reference ${error.digest}.`
-            : "Try again. This demonstration does not depend on a backend."
+            : "Check the local API connection and try again."
         }
         onRetry={reset}
       />

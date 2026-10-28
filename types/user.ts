@@ -17,3 +17,13 @@ export interface UserInput {
   role: UserRole;
   status: UserStatus;
 }
+
+export type AccountProvisioningMode = "CREATE" | "LINK";
+
+export interface LinkableAccount {
+  id: string;
+  email: string;
+  name: string;
+  role: "STUDENT" | "TEACHER";
+  status: "ACTIVE";
+}

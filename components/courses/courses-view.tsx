@@ -1,226 +1,38 @@
 "use client";
 
+import { ApiCrudView, type CrudColumn, type CrudField } from "@/components/data/api-crud-view";
+import { useApiList } from "@/lib/use-api-list";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Dialog } from "@/components/ui/dialog";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Feedback } from "@/components/ui/feedback";
-import { FormActions } from "@/components/ui/form-actions";
-import { Input } from "@/components/ui/input";
-import { PageHeader } from "@/components/ui/page-header";
-import { Pagination } from "@/components/ui/pagination";
-import { RiskBadge } from "@/components/ui/status-badges";
-import { Select } from "@/components/ui/select";
-import { Table, TBody, TD, TH, THead, TR } from "@/components/ui/table";
-import { usePagination } from "@/hooks/use-pagination";
-import { recordRisk } from "@/lib/academics";
-import { courseRows, recordRows, type CourseRow } from "@/lib/selectors";
-import { addCourse, deleteCourse, updateCourse, useAdminState } from "@/lib/store";
-import { formatPercent, includesQuery, selectedOrAll, semesterOptions } from "@/lib/utils";
-import type { FieldErrors } from "@/types/common";
-import { validateCourseForm, type CourseFormValues } from "@/lib/validation";
-import { Plus } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { apiDelete, apiGet, apiPost } from "@/lib/api";
+import { useEffect, useState, type FormEvent } from "react";
+
+interface Department { id: string; code: string; name: string; }
+interface Course { id: string; code: string; name: string; departmentId: string; department: Department; credits: string | number; active: boolean; _count: { offerings: number }; }
 
 export function CoursesView() {
-  const state = useAdminState();
-  const rows = courseRows(state);
-  const [query, setQuery] = useState("");
-  const [department, setDepartment] = useState("all");
-  const [semester, setSemester] = useState("all");
-  const [editing, setEditing] = useState<CourseRow | null>(null);
-  const [creating, setCreating] = useState(false);
-  const [details, setDetails] = useState<CourseRow | null>(null);
-  const [pending, setPending] = useState<CourseRow | null>(null);
-  const [message, setMessage] = useState("");
-  const departmentId = selectedOrAll(department, state.departments.map((item) => item.id));
-
-  const filtered = useMemo(
-    () =>
-      rows.filter((course) => {
-        const matchesQuery = includesQuery(query, [course.name, course.code, course.teacherName]);
-        const matchesDepartment = departmentId === "all" || course.departmentId === departmentId;
-        const matchesSemester = semester === "all" || course.semester === Number(semester);
-        return matchesQuery && matchesDepartment && matchesSemester;
-      }),
-    [rows, query, departmentId, semester],
-  );
-  const pagination = usePagination(filtered, state.settings.system.pageSize);
-  const detailRecords = details
-    ? recordRows(state).filter((record) => record.courseId === details.id)
-    : [];
-
-  return (
-    <div className="space-y-4">
-      <PageHeader
-        title="Courses"
-        description="Course assignments and demonstration scores. Averages are calculated from session records, not from an official results archive."
-        actions={<Button onClick={() => setCreating(true)}><Plus className="h-4 w-4" aria-hidden="true" />Add course</Button>}
-      />
-      <Feedback message={message} />
-      <Card className="p-4">
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <Input id="course-search" label="Search" placeholder="Name, code, or teacher" value={query} onChange={(event) => { setQuery(event.target.value); pagination.setPage(1); }} />
-          <Select id="course-department" label="Department" value={departmentId} onChange={(event) => { setDepartment(event.target.value); pagination.setPage(1); }} options={[{ label: "All departments", value: "all" }, ...state.departments.map((item) => ({ label: item.code, value: item.id }))]} />
-          <Select id="course-semester" label="Semester" value={semester} onChange={(event) => { setSemester(event.target.value); pagination.setPage(1); }} options={semesterOptions(true)} />
-        </div>
-      </Card>
-      <Card>
-        {filtered.length === 0 ? (
-          <EmptyState title="No courses match these filters" description="Adjust the search or add a course to this session." />
-        ) : (
-          <>
-            <div className="hidden lg:block">
-              <Table className="min-w-[980px]">
-                <caption className="sr-only">Courses</caption>
-                <THead>
-                  <TR>
-                    <TH>Course</TH><TH>Code</TH><TH>Department</TH><TH>Semester</TH><TH>Teacher</TH><TH>Students</TH><TH>Average</TH><TH>High-risk records</TH><TH>Actions</TH>
-                  </TR>
-                </THead>
-                <TBody>
-                  {pagination.pagedItems.map((course) => (
-                    <TR key={course.id}>
-                      <TD className="font-medium text-slate-900">{course.name}</TD>
-                      <TD>{course.code}</TD>
-                      <TD>{course.departmentName}</TD>
-                      <TD>{course.semester}</TD>
-                      <TD>{course.teacherName}</TD>
-                      <TD>{course.studentCount}</TD>
-                      <TD>{course.averageScore === null ? "—" : course.averageScore}</TD>
-                      <TD>{course.highRiskPercent === null ? "—" : formatPercent(course.highRiskPercent)}</TD>
-                      <TD>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" onClick={() => setDetails(course)}>Details</Button>
-                          <Button variant="outline" size="sm" onClick={() => setEditing(course)}>Edit</Button>
-                          <Button variant="ghost" size="sm" className="text-danger" onClick={() => setPending(course)}>Delete</Button>
-                        </div>
-                      </TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-            </div>
-            <div className="space-y-3 p-4 lg:hidden">
-              {pagination.pagedItems.map((course) => (
-                <article key={course.id} className="rounded-lg border border-slate-200 p-3">
-                  <p className="font-medium text-slate-900">{course.name}</p>
-                  <p className="text-xs text-slate-500">{course.code} · Semester {course.semester}</p>
-                  <dl className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-500">
-                    <div><dt>Department</dt><dd className="font-medium text-slate-900">{course.departmentName}</dd></div>
-                    <div><dt>Teacher</dt><dd className="font-medium text-slate-900">{course.teacherName}</dd></div>
-                    <div><dt>Students</dt><dd className="font-medium text-slate-900">{course.studentCount}</dd></div>
-                    <div><dt>Average</dt><dd className="font-medium text-slate-900">{course.averageScore ?? "—"}</dd></div>
-                    <div className="col-span-2"><dt>High-risk records</dt><dd className="font-medium text-slate-900">{course.highRiskPercent === null ? "—" : formatPercent(course.highRiskPercent)}</dd></div>
-                  </dl>
-                  <div className="mt-3 grid grid-cols-3 gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setDetails(course)}>Details</Button>
-                    <Button variant="outline" size="sm" onClick={() => setEditing(course)}>Edit</Button>
-                    <Button variant="ghost" size="sm" className="text-danger" onClick={() => setPending(course)}>Delete</Button>
-                  </div>
-                </article>
-              ))}
-            </div>
-            <Pagination {...pagination} onPageChange={pagination.setPage} />
-          </>
-        )}
-      </Card>
-
-      {creating ? <CourseForm onClose={() => setCreating(false)} onSaved={setMessage} /> : null}
-      {editing ? <CourseForm course={editing} onClose={() => setEditing(null)} onSaved={setMessage} /> : null}
-      <Dialog open={details !== null} size="lg" title={details ? details.name : "Course"} description={details ? `${details.code} · ${details.credits} credits` : undefined} onClose={() => setDetails(null)}>
-        {detailRecords.length === 0 ? (
-          <p className="text-sm text-slate-500">No academic records are linked to this course.</p>
-        ) : (
-          <Card>
-            <CardHeader><CardTitle>Enrolled records</CardTitle></CardHeader>
-            <CardContent className="space-y-3 px-0">
-              {detailRecords.map((record) => {
-                const full = state.records.find((item) => item.id === record.id);
-                const risk = full ? recordRisk(full) : "low";
-                return (
-                  <div key={record.id} className="flex items-start justify-between gap-3 border-t border-slate-100 px-5 py-3 first:border-t-0">
-                    <div>
-                      <p className="text-sm font-medium text-slate-900">{record.studentName}</p>
-                      <p className="text-xs text-slate-500">{record.publicStudentId} · Semester {record.semester}</p>
-                    </div>
-                    <RiskBadge level={risk} />
-                  </div>
-                );
-              })}
-            </CardContent>
-          </Card>
-        )}
-      </Dialog>
-      <ConfirmDialog
-        open={pending !== null}
-        title="Delete course"
-        description={pending ? `Remove ${pending.name}? Academic records for this course will also be removed from the demonstration session.` : ""}
-        confirmLabel="Delete course"
-        onClose={() => setPending(null)}
-        onConfirm={() => {
-          if (!pending) return;
-          deleteCourse(pending.id);
-          setMessage("Course and its demonstration records were removed from this session.");
-          setPending(null);
-        }}
-      />
-    </div>
-  );
+  const { items: departments } = useApiList<Department>("/departments");
+  const fields: CrudField<Course>[] = [
+    { name: "code", label: "Course code", required: true, minLength: 2, maxLength: 32 },
+    { name: "name", label: "Course name", required: true, minLength: 2, maxLength: 160 },
+    { name: "departmentId", label: "Department", type: "select", required: true, value: (row) => row.departmentId, options: departments.map((d) => ({ label: `${d.code} Â· ${d.name}`, value: d.id })) },
+    { name: "credits", label: "Credits", type: "number", required: true, min: 0.01, max: 100, step: 0.01 },
+  ];
+  const columns: CrudColumn<Course>[] = [
+    { label: "Course code", value: (row) => <span className="font-medium text-slate-900">{row.code}</span>, sortValue: (row) => row.code },
+    { label: "Course", value: (row) => row.name, sortValue: (row) => row.name },
+    { label: "Department", value: (row) => `${row.department.code} Â· ${row.department.name}` },
+    { label: "Credits", value: (row) => row.credits, sortValue: (row) => Number(row.credits) },
+    { label: "Offerings", value: (row) => row._count.offerings, sortValue: (row) => row._count.offerings },
+    { label: "Status", value: (row) => row.active ? "Active" : "Archived", sortValue: (row) => row.active ? 1 : 0 },
+  ];
+  return <div className="space-y-8"><ApiCrudView title="Courses" description="Database course catalog. Term, section, and teacher assignments are managed separately as course offerings." endpoint="/courses/catalog?page=1&pageSize=100" writeEndpoint="/courses" fields={fields} columns={columns} makePayload={(v) => ({ code: v.code.trim(), name: v.name.trim(), departmentId: v.departmentId, credits: Number(v.credits) })} /><OfferingsPanel/></div>;
 }
 
-function CourseForm({
-  course,
-  onClose,
-  onSaved,
-}: {
-  course?: CourseRow;
-  onClose: () => void;
-  onSaved: (message: string) => void;
-}) {
-  const state = useAdminState();
-  const [values, setValues] = useState<CourseFormValues>({
-    name: course?.name ?? "",
-    code: course?.code ?? "",
-    departmentId: course?.departmentId ?? state.departments[0]?.id ?? "",
-    semester: String(course?.semester ?? 1),
-    teacherId: course?.teacherId ?? "",
-    credits: String(course?.credits ?? 3),
-  });
-  const [errors, setErrors] = useState<FieldErrors>({});
-
-  function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const result = validateCourseForm(values, state, course?.id);
-    setErrors(result.errors);
-    if (!result.value) return;
-    const action = course ? updateCourse(course.id, result.value) : addCourse(result.value);
-    if (!action.ok) {
-      setErrors({ form: action.message });
-      return;
-    }
-    onSaved(course ? "Course updated in this demonstration session." : "Course added in this demonstration session.");
-    onClose();
-  }
-
-  return (
-    <Dialog open size="lg" title={course ? "Edit course" : "Add course"} description="Saving a course does not create assessment results." onClose={onClose}>
-      <form onSubmit={onSubmit} noValidate className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-        {errors.form ? <p role="alert" className="text-sm text-danger sm:col-span-2">{errors.form}</p> : null}
-        <Input id="course-name" label="Course name" value={values.name} error={errors.name} onChange={(event) => setValues({ ...values, name: event.target.value })} data-initial-focus />
-        <Input id="course-code" label="Code" hint="Example: CSE 310" value={values.code} error={errors.code} onChange={(event) => setValues({ ...values, code: event.target.value })} />
-        <Select id="course-form-department" label="Department" value={values.departmentId} error={errors.departmentId} onChange={(event) => setValues({ ...values, departmentId: event.target.value })} options={state.departments.map((item) => ({ label: item.name, value: item.id }))} />
-        <Select id="course-form-semester" label="Semester" value={values.semester} error={errors.semester} onChange={(event) => setValues({ ...values, semester: event.target.value })} options={semesterOptions()} />
-        <Select id="course-teacher" label="Assigned teacher" value={values.teacherId} error={errors.teacherId} onChange={(event) => setValues({ ...values, teacherId: event.target.value })} options={[{ label: "Unassigned", value: "" }, ...state.teachers.map((teacher) => ({ label: teacher.name, value: teacher.id }))]} />
-        <Input id="course-credits" label="Credits" inputMode="numeric" value={values.credits} error={errors.credits} onChange={(event) => setValues({ ...values, credits: event.target.value })} />
-        <div className="sm:col-span-2">
-          <FormActions>
-            <Button variant="outline" onClick={onClose}>Cancel</Button>
-            <Button type="submit">{course ? "Save changes" : "Add course"}</Button>
-          </FormActions>
-        </div>
-      </form>
-    </Dialog>
-  );
-}
+interface Term {id:string;code:string;label:string;}
+interface TeacherOption {id:string;name:string;}
+interface StudentOption {id:string;studentNumber:string;name:string;}
+interface Offering {id:string;section:string;course:{code:string;name:string};term:{label:string};teacher:{id:string;name:string}|null;_count:{enrollments:number};}
+interface Enrollment {id:string;status:string;student:{id:string;studentNumber:string;name:string};}
+function OfferingsPanel(){const{items:courses}=useApiList<Course>("/courses/catalog?page=1&pageSize=100");const{items:terms,reload:reloadTerms}=useApiList<Term>("/terms?page=1&pageSize=100");const{items:teachers}=useApiList<TeacherOption>("/teachers?page=1&pageSize=100");const{items:students}=useApiList<StudentOption>("/students?page=1&pageSize=100");const{items:offerings,loading,error,reload}=useApiList<Offering>("/courses");const[courseId,setCourseId]=useState("");const[termId,setTermId]=useState("");const[teacherId,setTeacherId]=useState("");const[section,setSection]=useState("A");const[selected,setSelected]=useState("");const[studentId,setStudentId]=useState("");const[enrollments,setEnrollments]=useState<Enrollment[]>([]);const[message,setMessage]=useState("");const[term,setTerm]=useState({code:"",label:"",academicYear:"",startsAt:"",endsAt:""});useEffect(()=>{if(selected){const timer=window.setTimeout(()=>{void apiGet<Enrollment[]>(`/offerings/${selected}/enrollments`).then((result)=>setEnrollments(result.data)).catch((cause)=>setMessage(cause instanceof Error?cause.message:"Unable to load enrollments."));},0);return()=>window.clearTimeout(timer);}},[selected]);async function createOffering(event:FormEvent<HTMLFormElement>){event.preventDefault();try{await apiPost("/offerings",{courseId,termId,...(teacherId?{teacherId}:{}),section});setMessage("Course offering saved.");await reload();}catch(cause){setMessage(cause instanceof Error?cause.message:"Unable to create offering.");}}async function createTerm(event:FormEvent<HTMLFormElement>){event.preventDefault();try{const result=await apiPost<Term>("/terms",term);setTermId(result.data.id);setTerm({code:"",label:"",academicYear:"",startsAt:"",endsAt:""});setMessage("Term saved to the database.");await reloadTerms();}catch(cause){setMessage(cause instanceof Error?cause.message:"Unable to create term.");}}async function enroll(){if(!selected||!studentId)return;try{await apiPost(`/offerings/${selected}/enrollments`,{studentId});setEnrollments((await apiGet<Enrollment[]>(`/offerings/${selected}/enrollments`)).data);setMessage("Enrollment saved.");}catch(cause){setMessage(cause instanceof Error?cause.message:"Unable to enroll student.");}}async function withdraw(student:string){if(!selected)return;try{await apiDelete(`/offerings/${selected}/enrollments/${student}`);setEnrollments((await apiGet<Enrollment[]>(`/offerings/${selected}/enrollments`)).data);setMessage("Enrollment withdrawn.");}catch(cause){setMessage(cause instanceof Error?cause.message:"Unable to withdraw enrollment.");}}return <section className="space-y-4"><div><h2 className="text-lg font-semibold">Terms, course offerings, and enrollments</h2><p className="text-sm text-slate-600">Terms and offerings are persisted records; enrollment changes are kept in PostgreSQL.</p></div><Card><CardHeader><CardTitle>Create academic term</CardTitle></CardHeader><CardContent><form onSubmit={(event)=>void createTerm(event)} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{(["code","label","academicYear","startsAt","endsAt"] as const).map((key)=><label key={key} className="text-sm">{key}<input required type={key.endsWith("At")?"date":"text"} className="mt-1 h-10 w-full rounded border px-2" value={term[key]} onChange={(event)=>setTerm({...term,[key]:event.target.value})}/></label>)}<Button type="submit">Save term</Button></form></CardContent></Card><Card><CardHeader><CardTitle>Create offering</CardTitle></CardHeader><CardContent><form onSubmit={(event)=>void createOffering(event)} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><label className="text-sm">Course<select required className="mt-1 h-10 w-full rounded border px-2" value={courseId} onChange={(event)=>setCourseId(event.target.value)}><option value="">Select course</option>{courses.filter((course)=>course.active).map((course)=><option key={course.id} value={course.id}>{course.code} Â· {course.name}</option>)}</select></label><label className="text-sm">Term<select required className="mt-1 h-10 w-full rounded border px-2" value={termId} onChange={(event)=>setTermId(event.target.value)}><option value="">Select term</option>{terms.map((item)=><option key={item.id} value={item.id}>{item.code} Â· {item.label}</option>)}</select></label><label className="text-sm">Teacher (optional)<select className="mt-1 h-10 w-full rounded border px-2" value={teacherId} onChange={(event)=>setTeacherId(event.target.value)}><option value="">Unassigned</option>{teachers.map((teacher)=><option key={teacher.id} value={teacher.id}>{teacher.name}</option>)}</select></label><label className="text-sm">Section<input className="mt-1 h-10 w-full rounded border px-2" value={section} maxLength={32} onChange={(event)=>setSection(event.target.value)}/></label><Button type="submit" disabled={!courseId||!termId}>Save offering</Button></form></CardContent></Card>{message?<p role="status" className="text-sm">{message}</p>:null}{loading?<p>Loading offeringsâ€¦</p>:error?<p role="alert">{error}</p>:offerings.length===0?<EmptyState title="No offerings" description="Create an offering after adding courses and terms."/>:<Card><div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr>{["Course","Term","Section","Teacher","Enrollment",""].map((x)=><th key={x} className="px-4 py-3">{x}</th>)}</tr></thead><tbody>{offerings.map((offering)=><tr key={offering.id} className="border-t"><td className="px-4 py-3">{offering.course.code} Â· {offering.course.name}</td><td>{offering.term.label}</td><td>{offering.section}</td><td>{offering.teacher?.name??"Unassigned"}</td><td>{offering._count.enrollments}</td><td><Button size="sm" variant="outline" onClick={()=>setSelected(offering.id)}>Enrollments</Button></td></tr>)}</tbody></table></div></Card>}{selected?<Card><CardHeader><CardTitle>Offering enrollment</CardTitle></CardHeader><CardContent className="space-y-3"><div className="flex flex-wrap gap-2"><select className="h-10 min-w-64 rounded border px-2" value={studentId} onChange={(event)=>setStudentId(event.target.value)}><option value="">Select active student</option>{students.map((student)=><option key={student.id} value={student.id}>{student.studentNumber} Â· {student.name}</option>)}</select><Button onClick={()=>void enroll()} disabled={!studentId}>Enroll</Button><Button variant="outline" onClick={()=>setSelected("")}>Close</Button></div>{enrollments.map((row)=><div key={row.id} className="flex items-center justify-between border-t py-2 text-sm"><span>{row.student.studentNumber} Â· {row.student.name} Â· {row.status}</span>{row.status==="ENROLLED"?<Button variant="ghost" size="sm" className="text-danger" onClick={()=>void withdraw(row.student.id)}>Withdraw</Button>:null}</div>)}</CardContent></Card>:null}</section>}
