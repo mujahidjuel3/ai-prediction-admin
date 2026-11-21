@@ -2,4 +2,31 @@
 import { FormEvent,useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signIn } from '@/lib/auth-client';
-export function LoginForm(){const router=useRouter();const[email,setEmail]=useState('');const[password,setPassword]=useState('');const[error,setError]=useState('');const[busy,setBusy]=useState(false);async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setError('');try{await signIn(email,password);router.replace('/dashboard');router.refresh();}catch(err){setError(err instanceof Error?err.message:'Sign-in failed.');}finally{setBusy(false);}}return <form onSubmit={submit} className="space-y-4"><label className="block text-sm font-medium text-slate-700">Email<input required type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} className="mt-1 block h-10 w-full rounded-md border border-slate-300 px-3" /></label><label className="block text-sm font-medium text-slate-700">Password<input required type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} className="mt-1 block h-10 w-full rounded-md border border-slate-300 px-3" /></label>{error?<p role="alert" className="text-sm text-red-700">{error}</p>:null}<button disabled={busy} className="h-10 w-full rounded-md bg-slate-900 px-4 text-sm font-medium text-white disabled:opacity-60">{busy?'Signing in…':'Sign in'}</button></form>;}
+export function LoginForm(){
+  const router=useRouter();
+  const[email,setEmail]=useState('');
+  const[password,setPassword]=useState('');
+  const[error,setError]=useState('');
+  const[busy,setBusy]=useState(false);
+  async function submit(e:FormEvent<HTMLFormElement>){
+    e.preventDefault();
+    if(busy)return;
+    setBusy(true);setError('');
+    try{
+      await signIn(email,password);
+      router.replace('/dashboard');
+      router.refresh();
+    }catch(err){
+      setError(err instanceof Error?err.message:'Sign-in failed.');
+    }finally{
+      setBusy(false);
+    }
+  }
+  return <form onSubmit={submit} className="space-y-4">
+    <p className="text-sm text-slate-600">Admin panel sign-in. Student self-registration is available on the main site login page. Teacher accounts are provisioned by an administrator.</p>
+    <label className="block text-sm font-medium text-slate-700">Email<input required type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} className="mt-1 block h-10 w-full rounded-md border border-slate-300 px-3" /></label>
+    <label className="block text-sm font-medium text-slate-700">Password<input required type="password" autoComplete="current-password" value={password} onChange={e=>setPassword(e.target.value)} className="mt-1 block h-10 w-full rounded-md border border-slate-300 px-3" /></label>
+    {error?<p role="alert" className="text-sm text-red-700">{error}</p>:null}
+    <button disabled={busy} className="h-10 w-full rounded-md bg-slate-900 px-4 text-sm font-medium text-white disabled:opacity-60">{busy?'Signing in…':'Sign in'}</button>
+  </form>;
+}

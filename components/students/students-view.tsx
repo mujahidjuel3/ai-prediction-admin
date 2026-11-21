@@ -1,16 +1,19 @@
 "use client";
 
 import { ApiCrudView, type CrudField, type CrudColumn } from "@/components/data/api-crud-view";
+import { Select } from "@/components/ui/select";
 import { apiQuery } from "@/lib/api";
 import { useApiList } from "@/lib/use-api-list";
 import type { LinkableAccount } from "@/types/user";
 import type { CreateStudentProfileRequest } from "@/types/student";
 import Link from "next/link";
+import { useMemo, useState } from "react";
 
 interface Department { id: string; code: string; name: string; }
 interface Student { id: string; userId: string | null; studentNumber: string; name: string; email: string | null; departmentId: string; department: { code: string; name: string }; enrollmentYear: number; status: string; }
 
 export function StudentsView({ initialQuery = "" }: { initialQuery?: string }) {
+  const [statusFilter, setStatusFilter] = useState<"ACTIVE" | "INACTIVE" | "ALL">("ACTIVE");
   const { items: departments } = useApiList<Department>("/departments");
   const { items: linkableUsers } = useApiList<LinkableAccount>("/users/linkable?role=STUDENT");
   const fields: CrudField<Student>[] = [
@@ -33,11 +36,39 @@ export function StudentsView({ initialQuery = "" }: { initialQuery?: string }) {
     { label: "Status", value: (row) => row.status, sortValue: (row) => row.status },
     { label: "Profile", value: (row) => <Link href={`/students/${row.id}`} className="font-medium text-primary">View</Link> },
   ];
-  const initialPath = `/students${apiQuery({ q: initialQuery, page: 1, pageSize: 100 })}`;
-  return <ApiCrudView title="Students" description="Student profiles stay linked to an active Student-role account. Direct password setup is for local development only; production account creation requires an approved invitation/reset flow." endpoint={initialPath} writeEndpoint="/students" fields={fields} columns={columns} makePayload={(v, editing) => {
-    if (editing) return { studentNumber: v.studentNumber.trim(), name: v.name.trim(), ...(v.profileEmail.trim() ? { email: v.profileEmail.trim() } : {}), departmentId: v.departmentId, enrollmentYear: Number(v.enrollmentYear) };
-    const profile = { studentNumber: v.studentNumber.trim(), name: v.name.trim(), departmentId: v.departmentId, enrollmentYear: Number(v.enrollmentYear) };
-    const account = v.accountMode === "CREATE" ? { accountMode: "CREATE" as const, email: v.email.trim(), initialPassword: v.initialPassword } : { accountMode: "LINK" as const, userId: v.userId };
-    return { ...profile, ...account } satisfies CreateStudentProfileRequest;
-  }} accountLink={{ endpointFor: (row) => `/students/${row.id}/link-account`, users: linkableUsers, linked: (row) => Boolean(row.userId), roleLabel: "Student" }} deactivate />;
+  const endpoint = useMemo(
+    () => `/students${apiQuery({ q: initialQuery, page: 1, pageSize: 100, status: statusFilter })}`,
+    [initialQuery, statusFilter],
+  );
+  return (
+    <div className="space-y-4">
+      <Select
+        label="Status filter"
+        value={statusFilter}
+        onChange={(event) => setStatusFilter(event.target.value as "ACTIVE" | "INACTIVE" | "ALL")}
+        options={[
+          { label: "Active students", value: "ACTIVE" },
+          { label: "Inactive students", value: "INACTIVE" },
+          { label: "All students", value: "ALL" },
+        ]}
+      />
+      <ApiCrudView
+        title="Students"
+        description="Student profiles stay linked to an active Student-role account. Create, edit, deactivate, and reactivate profiles manually. CSV import remains available under Academic Records."
+        endpoint={endpoint}
+        writeEndpoint="/students"
+        fields={fields}
+        columns={columns}
+        makePayload={(v, editing) => {
+          if (editing) return { studentNumber: v.studentNumber.trim(), name: v.name.trim(), ...(v.profileEmail.trim() ? { email: v.profileEmail.trim() } : {}), departmentId: v.departmentId, enrollmentYear: Number(v.enrollmentYear) };
+          const profile = { studentNumber: v.studentNumber.trim(), name: v.name.trim(), departmentId: v.departmentId, enrollmentYear: Number(v.enrollmentYear) };
+          const account = v.accountMode === "CREATE" ? { accountMode: "CREATE" as const, email: v.email.trim(), initialPassword: v.initialPassword } : { accountMode: "LINK" as const, userId: v.userId };
+          return { ...profile, ...account } satisfies CreateStudentProfileRequest;
+        }}
+        accountLink={{ endpointFor: (row) => `/students/${row.id}/link-account`, users: linkableUsers, linked: (row) => Boolean(row.userId), roleLabel: "Student" }}
+        deactivate
+        reactivate
+      />
+    </div>
+  );
 }

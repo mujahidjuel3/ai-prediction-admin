@@ -25,9 +25,9 @@ export interface CrudColumn<T> { label: string; value: (row: T) => ReactNode; so
 interface ApiRecord { id: string; }
 interface AccountLinkConfig<T> { endpointFor: (row: T) => string; users: LinkableAccount[]; linked: (row: T) => boolean; roleLabel: string; }
 
-export function ApiCrudView<T extends ApiRecord>({ title, description, endpoint, writeEndpoint = endpoint, fields, columns, makePayload, deactivate = false, accountLink }: {
+export function ApiCrudView<T extends ApiRecord>({ title, description, endpoint, writeEndpoint = endpoint, fields, columns, makePayload, deactivate = false, reactivate = false, accountLink }: {
   title: string; description: string; endpoint: string; writeEndpoint?: string; fields: CrudField<T>[]; columns: CrudColumn<T>[];
-  makePayload?: (values: Record<string, string>, editing: boolean) => unknown; deactivate?: boolean; accountLink?: AccountLinkConfig<T>;
+  makePayload?: (values: Record<string, string>, editing: boolean) => unknown; deactivate?: boolean; reactivate?: boolean; accountLink?: AccountLinkConfig<T>;
 }) {
   const { items, loading, error, reload } = useApiList<T>(endpoint);
   const [editing, setEditing] = useState<T | null>(null);
@@ -63,7 +63,7 @@ export function ApiCrudView<T extends ApiRecord>({ title, description, endpoint,
     setPage(1);
   }
   function begin(row?: T) { setEditing(row ?? null); setFormError(""); setFieldErrors({}); setMessage(""); setValues(Object.fromEntries(fields.map((field) => [field.name, row ? (field.value ? field.value(row) : String((row as Record<string, unknown>)[field.name] ?? "")) : ""]))); setOpen(true); }
-  async function save(event: FormEvent) { event.preventDefault(); setBusy(true); setFormError(""); setFieldErrors({}); try {
+  async function save(event: FormEvent) { event.preventDefault(); if (busy) return; setBusy(true); setFormError(""); setFieldErrors({}); try {
     const activeFields = fields.filter((field) => (!field.createOnly || !editing) && (!field.editOnly || editing) && (!field.visibleWhen || values[field.visibleWhen.field] === field.visibleWhen.value));
     const missing = activeFields.find((field) => (field.required || (field.requiredWhen && values[field.requiredWhen.field] === field.requiredWhen.value)) && (!values[field.name] || !values[field.name].trim()));
     if (missing) { setFieldErrors({ [missing.name]: `${missing.label} is required.` }); setBusy(false); return; }
@@ -98,14 +98,31 @@ export function ApiCrudView<T extends ApiRecord>({ title, description, endpoint,
     setLinkTarget(null); setLinkValues({ accountMode: "", email: "", initialPassword: "", userId: "" });
     const refreshed = await reload(); setMessage(refreshed.ok ? "Account linked." : `Account linked, but the list could not refresh: ${refreshed.error}`);
   } catch (cause) { setLinkError(cause instanceof Error ? cause.message : "Could not link account."); setLinkValues(current=>({...current,initialPassword:""})); } finally { setBusy(false); } }
-  async function remove(row: T) { if (!window.confirm(`Deactivate/archive this ${title.toLowerCase()} record?`)) return; setBusy(true); setMessage(""); try { await apiDelete(`${writeEndpoint}/${row.id}`); const refreshed = await reload(); setMessage(refreshed.ok ? "Record updated." : `Record updated, but the list could not refresh: ${refreshed.error}`); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Update failed."); } finally { setBusy(false); } }
+  async function remove(row: T) { if (busy) return; if (!window.confirm(`Deactivate/archive this ${title.toLowerCase()} record?`)) return; setBusy(true); setMessage(""); try { await apiDelete(`${writeEndpoint}/${row.id}`); const refreshed = await reload(); setMessage(refreshed.ok ? "Record updated." : `Record updated, but the list could not refresh: ${refreshed.error}`); } catch (cause) { setMessage(cause instanceof Error ? cause.message : "Update failed."); } finally { setBusy(false); } }
+  async function restore(row: T) {
+    if (busy || !reactivate) return;
+    setBusy(true); setMessage("");
+    try {
+      await apiPost(`${writeEndpoint}/${row.id}/reactivate`, {});
+      const refreshed = await reload();
+      setMessage(refreshed.ok ? "Record reactivated." : `Record reactivated, but the list could not refresh: ${refreshed.error}`);
+    } catch (cause) {
+      setMessage(cause instanceof Error ? cause.message : "Reactivate failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return <div className="space-y-4">
-    <PageHeader title={title} description={description} actions={<Button onClick={() => begin()}><Plus className="h-4 w-4" />Add {title.toLowerCase().replace(/s$/, "")}</Button>} />
+    <PageHeader title={title} description={description} actions={<Button disabled={busy} onClick={() => begin()}><Plus className="h-4 w-4" />Add {title.toLowerCase().replace(/s$/, "")}</Button>} />
     {message ? <p role="status" className="rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">{message}</p> : null}
     <Input label="Search loaded records" value={query} onChange={(event) => setQuery(event.target.value)} />
-    {loading ? <LoadingState label={`Loading ${title.toLowerCase()}`} /> : error ? <ErrorState description={error} onRetry={() => void reload()} /> : visible.length === 0 ? <Card><EmptyState title={`No ${title.toLowerCase()} found`} description="Records from the database will appear here. Use Add to create a record." /></Card> : <Card><div className="overflow-x-auto"><Table><THead><TR>{columns.map((column) => column.sortValue ? <SortableHeader key={column.label} label={column.label} column={column.label} sortKey={sortKey} direction={sortDirection} onSort={changeSort} /> : <TH key={column.label}>{column.label}</TH>)}<TH>Actions</TH></TR></THead><TBody>{pagination.pagedItems.map((row) => <TR key={row.id}>{columns.map((column) => <TD key={column.label}>{column.value(row)}</TD>)}<TD><div className="flex gap-2"><Button size="sm" variant="outline" onClick={() => begin(row)}>Edit</Button>{accountLink&&!accountLink.linked(row)?<Button size="sm" variant="outline" onClick={()=>{setLinkTarget(row);setLinkError("");setLinkValues({accountMode:"",email:"",initialPassword:"",userId:""});}}>Link account</Button>:null}<Button size="sm" variant="ghost" className="text-danger" disabled={busy} onClick={() => void remove(row)}>{deactivate ? "Deactivate" : "Archive"}</Button></div></TD></TR>)}</TBody></Table></div><Pagination page={pagination.page} pageCount={pagination.pageCount} pageSize={pagination.pageSize} total={pagination.total} onPageChange={pagination.setPage} /></Card>}
-    <Dialog open={open} title={`${editing ? "Edit" : "Add"} ${title.toLowerCase().replace(/s$/, "")}`} onClose={() => { setOpen(false); setValues({}); }}>
+    {loading ? <LoadingState label={`Loading ${title.toLowerCase()}`} /> : error ? <ErrorState description={error} onRetry={() => void reload()} /> : visible.length === 0 ? <Card><EmptyState title={`No ${title.toLowerCase()} found`} description="Records from the database will appear here. Use Add to create a record." /></Card> : <Card><div className="overflow-x-auto"><Table><THead><TR>{columns.map((column) => column.sortValue ? <SortableHeader key={column.label} label={column.label} column={column.label} sortKey={sortKey} direction={sortDirection} onSort={changeSort} /> : <TH key={column.label}>{column.label}</TH>)}<TH>Actions</TH></TR></THead><TBody>{pagination.pagedItems.map((row) => {
+      const status = String((row as Record<string, unknown>).status ?? "").toUpperCase();
+      const inactive = status === "INACTIVE";
+      return <TR key={row.id}>{columns.map((column) => <TD key={column.label}>{column.value(row)}</TD>)}<TD><div className="flex flex-wrap gap-2"><Button size="sm" variant="outline" disabled={busy} onClick={() => begin(row)}>Edit</Button>{accountLink&&!accountLink.linked(row)&&!inactive?<Button size="sm" variant="outline" disabled={busy} onClick={()=>{setLinkTarget(row);setLinkError("");setLinkValues({accountMode:"",email:"",initialPassword:"",userId:""});}}>Link account</Button>:null}{reactivate && inactive ? <Button size="sm" variant="outline" disabled={busy} onClick={() => void restore(row)}>Reactivate</Button> : <Button size="sm" variant="ghost" className="text-danger" disabled={busy || inactive} onClick={() => void remove(row)}>{deactivate ? "Deactivate" : "Archive"}</Button>}</div></TD></TR>;
+    })}</TBody></Table></div><Pagination page={pagination.page} pageCount={pagination.pageCount} pageSize={pagination.pageSize} total={pagination.total} onPageChange={pagination.setPage} /></Card>}
+    <Dialog open={open} title={`${editing ? "Edit" : "Add"} ${title.toLowerCase().replace(/s$/, "")}`} onClose={() => { if (!busy) { setOpen(false); setValues({}); } }}>
       <form className="space-y-3" onSubmit={(event) => void save(event)}>{formError ? <p role="alert" className="text-sm text-danger">{formError}</p> : null}
         {fields.filter((field) => (!field.createOnly || !editing) && (!field.editOnly || editing) && (!field.visibleWhen || values[field.visibleWhen.field] === field.visibleWhen.value)).map((field) => field.type === "select" ? <div key={field.name}><Select id={`crud-${field.name}`} label={field.label} hint={field.hint} value={values[field.name] ?? ""} required={field.required || (field.requiredWhen ? values[field.requiredWhen.field] === field.requiredWhen.value : false)} onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))} options={[{ label: `Select ${field.label.toLowerCase()}`, value: "" }, ...(field.options ?? [])]} />{fieldErrors[field.name]?<p role="alert" className="mt-1 text-xs text-danger">{fieldErrors[field.name]}</p>:null}</div> : <Input key={field.name} id={`crud-${field.name}`} label={field.label} hint={field.hint} type={field.type ?? "text"} required={field.required || (field.requiredWhen ? values[field.requiredWhen.field] === field.requiredWhen.value : false)} min={field.min} max={field.max} step={field.step} minLength={field.minLength} maxLength={field.maxLength} value={values[field.name] ?? ""} error={fieldErrors[field.name]} onChange={(event) => setValues((current) => ({ ...current, [field.name]: event.target.value }))} />)}
         <div className="flex justify-end gap-2 pt-2"><Button type="button" variant="outline" onClick={() => { setOpen(false); setValues({}); }}>Cancel</Button><Button type="submit" disabled={busy}>{busy ? "Saving…" : "Save"}</Button></div>
