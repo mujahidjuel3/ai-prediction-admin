@@ -8,6 +8,7 @@ import { LoadingState } from "@/components/ui/loading-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { useNotificationSocket } from "@/hooks/use-notification-socket";
 import { apiPatch, apiPost, apiRequest } from "@/lib/api";
 import { useApiList } from "@/lib/use-api-list";
 import { useEffect, useRef, useState, type FormEvent } from "react";
@@ -75,6 +76,15 @@ export function NotificationsView() {
     return () => { cancelled=true; };
   }, []);
 
+  useNotificationSocket({
+    enabled: true,
+    onEvent: (event) => {
+      if (inboxFilter === "unread" && event.readAt) return;
+      void reload();
+    },
+    onReconnectSync: () => { void reload(); },
+  });
+
   async function update(path:string,body?:unknown) {
     if(busy)return;
     setBusy(true);setActionError("");setFeedback("");
@@ -124,7 +134,7 @@ export function NotificationsView() {
   }
 
   return <div className="space-y-4">
-    <PageHeader title="Notifications" description="Recipient inbox and Admin-authored in-app messages. Email is attempted only when the recipient opted in and server SMTP is enabled; SMTP acceptance does not confirm inbox delivery. Automated ML risk-alert email remains disabled." actions={<Button variant="outline" disabled={!unread||busy} onClick={()=>void update("/notifications/read-all")}>Mark all read</Button>}/>
+    <PageHeader title="Notifications" description="Recipient inbox and Admin-authored in-app messages. Realtime delivery supplements REST; history remains API-backed. Email is attempted only when the recipient opted in and server SMTP/Brevo is enabled; provider acceptance does not confirm inbox delivery. Automated ML risk-alert email remains disabled." actions={<Button variant="outline" disabled={!unread||busy} onClick={()=>void update("/notifications/read-all")}>Mark all read</Button>}/>
     <Card className="p-4 space-y-2">
       <h2 className="font-semibold">Email controls (server-side)</h2>
       {controlsError?<p role="alert" className="text-sm text-danger">{controlsError}</p>:null}

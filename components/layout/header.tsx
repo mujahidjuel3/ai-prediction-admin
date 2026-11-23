@@ -2,10 +2,141 @@
 
 import { SessionIdentity } from "@/components/auth/session-identity";
 import { apiGet } from "@/lib/api";
+import { disconnectNotificationSocket } from "@/lib/notification-socket";
 import { titleForPath } from "@/lib/nav";
 import { Bell, Menu } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-export function Header({open,onMenuClick}:{open:boolean;onMenuClick:()=>void}){const pathname=usePathname();const[unread,setUnread]=useState(0);const[menuOpen,setMenuOpen]=useState(false);const menuRef=useRef<HTMLDivElement>(null);useEffect(()=>{let active=true;void apiGet<unknown[]>("/notifications?unread=true&page=1&pageSize=1").then((result)=>{if(active)setUnread(result.meta?.total??result.data.length);}).catch(()=>{if(active)setUnread(0);});return()=>{active=false;};},[pathname]);useEffect(()=>{if(!menuOpen)return;function onPointer(event:PointerEvent){if(!menuRef.current?.contains(event.target as Node))setMenuOpen(false);}function onKey(event:KeyboardEvent){if(event.key==="Escape")setMenuOpen(false);}document.addEventListener("pointerdown",onPointer);document.addEventListener("keydown",onKey);return()=>{document.removeEventListener("pointerdown",onPointer);document.removeEventListener("keydown",onKey);};},[menuOpen]);const student=pathname.startsWith("/students/");const current=titleForPath(pathname);return <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 lg:px-8"><div className="flex min-w-0 items-center gap-2"><button type="button" className="inline-flex h-11 w-11 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 lg:hidden" onClick={onMenuClick} aria-label="Open navigation" aria-controls="admin-sidebar" aria-expanded={open}><Menu className="h-5 w-5"/></button><nav aria-label="Breadcrumb"><ol className="flex items-center gap-1.5 text-sm"><li className="hidden text-slate-500 sm:block"><Link href="/dashboard" className="hover:text-slate-900">Administration</Link></li><li className="hidden text-slate-300 sm:block">/</li>{student?<><li className="hidden sm:block"><Link href="/students" className="text-slate-500">Students</Link></li><li className="hidden text-slate-300 sm:block">/</li></>:null}<li className="font-semibold text-slate-900">{student?"Student profile":current}</li></ol></nav></div><div className="flex shrink-0 items-center gap-1 sm:gap-2"><Link href="/notifications" className="relative inline-flex h-11 w-11 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100" aria-label={unread?`Notifications, ${unread} unread`:"Notifications, no unread items"}><Bell className="h-5 w-5"/>{unread>0?<span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white">{unread>9?"9+":unread}</span>:null}</Link><div className="relative" ref={menuRef}><button type="button" className="inline-flex h-11 items-center gap-2 rounded-md px-1.5 text-left hover:bg-slate-100" aria-haspopup="menu" aria-expanded={menuOpen} onClick={()=>setMenuOpen((value)=>!value)}><SessionIdentity/></button>{menuOpen?<div role="menu" className="absolute right-0 z-40 mt-1 w-52 rounded-lg border border-slate-200 bg-white p-1 shadow-sm"><Link role="menuitem" href="/settings" className="block rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" onClick={()=>setMenuOpen(false)}>Settings</Link><Link role="menuitem" href="/signed-out" className="block rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" onClick={()=>setMenuOpen(false)}>Log out</Link></div>:null}</div></div></header>}
+export function Header({
+  open,
+  onMenuClick,
+  unreadOverride,
+}: {
+  open: boolean;
+  onMenuClick: () => void;
+  unreadOverride?: number;
+}) {
+  const pathname = usePathname();
+  const [unread, setUnread] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (typeof unreadOverride === "number") {
+      setUnread(unreadOverride);
+      return;
+    }
+    let active = true;
+    void apiGet<unknown[]>("/notifications?unread=true&page=1&pageSize=1")
+      .then((result) => {
+        if (active) setUnread(result.meta?.total ?? result.data.length);
+      })
+      .catch(() => {
+        if (active) setUnread(0);
+      });
+    return () => {
+      active = false;
+    };
+  }, [pathname, unreadOverride]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function onPointer(event: PointerEvent) {
+      if (!menuRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [menuOpen]);
+
+  const student = pathname.startsWith("/students/");
+  const current = titleForPath(pathname);
+  return (
+    <header className="sticky top-0 z-30 flex h-16 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 lg:px-8">
+      <div className="flex min-w-0 items-center gap-2">
+        <button
+          type="button"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100 lg:hidden"
+          onClick={onMenuClick}
+          aria-label="Open navigation"
+          aria-controls="admin-sidebar"
+          aria-expanded={open}
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <nav aria-label="Breadcrumb">
+          <ol className="flex items-center gap-1.5 text-sm">
+            <li className="hidden text-slate-500 sm:block">
+              <Link href="/dashboard" className="hover:text-slate-900">
+                Administration
+              </Link>
+            </li>
+            <li className="hidden text-slate-300 sm:block">/</li>
+            {student ? (
+              <>
+                <li className="hidden sm:block">
+                  <Link href="/students" className="text-slate-500">
+                    Students
+                  </Link>
+                </li>
+                <li className="hidden text-slate-300 sm:block">/</li>
+              </>
+            ) : null}
+            <li className="font-semibold text-slate-900">{student ? "Student profile" : current}</li>
+          </ol>
+        </nav>
+      </div>
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
+        <Link
+          href="/notifications"
+          className="relative inline-flex h-11 w-11 items-center justify-center rounded-md text-slate-600 hover:bg-slate-100"
+          aria-label={unread ? `Notifications, ${unread} unread` : "Notifications, no unread items"}
+        >
+          <Bell className="h-5 w-5" />
+          {unread > 0 ? (
+            <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white">
+              {unread > 9 ? "9+" : unread}
+            </span>
+          ) : null}
+        </Link>
+        <div className="relative" ref={menuRef}>
+          <button
+            type="button"
+            className="inline-flex h-11 items-center gap-2 rounded-md px-1.5 text-left hover:bg-slate-100"
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((value) => !value)}
+          >
+            <SessionIdentity />
+          </button>
+          {menuOpen ? (
+            <div role="menu" className="absolute right-0 z-40 mt-1 w-52 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+              <Link role="menuitem" href="/settings" className="block rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" onClick={() => setMenuOpen(false)}>
+                Settings
+              </Link>
+              <Link
+                role="menuitem"
+                href="/signed-out"
+                className="block rounded-md px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                onClick={() => {
+                  disconnectNotificationSocket();
+                  setMenuOpen(false);
+                }}
+              >
+                Log out
+              </Link>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </header>
+  );
+}
