@@ -16,8 +16,11 @@ export function useNotificationSocket(options: {
 }) {
   const onEventRef = useRef(options.onEvent);
   const onReconnectSyncRef = useRef(options.onReconnectSync);
-  onEventRef.current = options.onEvent;
-  onReconnectSyncRef.current = options.onReconnectSync;
+
+  useEffect(() => {
+    onEventRef.current = options.onEvent;
+    onReconnectSyncRef.current = options.onReconnectSync;
+  }, [options.onEvent, options.onReconnectSync]);
 
   useEffect(() => {
     if (!options.enabled) {

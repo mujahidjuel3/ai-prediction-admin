@@ -24,6 +24,10 @@ interface EmailControls {
   workerEnabled:boolean;
   workerAutoRetry:boolean;
   automatedRiskAlertEmailEnabled:boolean;
+  testEmailEnabled?:boolean;
+  testRecipientCount?:number;
+  testRecipientsMasked?:string[];
+  emailProvider?:string;
   disclaimer:string;
 }
 interface DeliveryLog { id:string; action:string; changes:Record<string,unknown>|null; createdAt:string; }
@@ -60,7 +64,11 @@ export function NotificationsView() {
   const [controlsError,setControlsError]=useState("");
   const [logRows,setLogRows]=useState<DeliveryLog[]>([]);
   const [logFor,setLogFor]=useState<string|null>(null);
+  const [testTo,setTestTo]=useState("");
+  const [testSubject,setTestSubject]=useState("Academic Sentinel test email");
+  const [testMessage,setTestMessage]=useState("Controlled test email to an allowlisted recipient only. Not a student risk alert.");
   const pendingKey=useRef<string|null>(null);
+  const testKey=useRef<string|null>(null);
   const unread=items.filter((item)=>!item.readAt).length;
 
   useEffect(() => {
@@ -133,18 +141,47 @@ export function NotificationsView() {
     finally { setBusy(false); }
   }
 
+  async function sendTestEmail(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();if(busy)return;
+    testKey.current??=crypto.randomUUID();
+    setBusy(true);setFeedback("");setActionError("");
+    try {
+      const response=await apiRequest<SendResult & {disclaimer?:string}>("/notifications/email/test",{
+        method:"POST",
+        headers:{"Idempotency-Key":testKey.current},
+        body:JSON.stringify({to:testTo.trim(),subject:testSubject.trim(),message:testMessage.trim()}),
+      });
+      testKey.current=null;
+      const refreshed=await reloadDeliveries();
+      setFeedback(`${deliveryMessage(response.data)} ${response.data.disclaimer??""}${refreshed.ok?"":` Email history refresh failed: ${refreshed.error}`}`);
+    } catch(cause) { setActionError(cause instanceof Error?cause.message:"Unable to send test email."); }
+    finally { setBusy(false); }
+  }
+
   return <div className="space-y-4">
-    <PageHeader title="Notifications" description="Recipient inbox and Admin-authored in-app messages. Realtime delivery supplements REST; history remains API-backed. Email is attempted only when the recipient opted in and server SMTP/Brevo is enabled; provider acceptance does not confirm inbox delivery. Automated ML risk-alert email remains disabled." actions={<Button variant="outline" disabled={!unread||busy} onClick={()=>void update("/notifications/read-all")}>Mark all read</Button>}/>
+    <PageHeader title="Notifications" description="Recipient inbox and Admin-authored in-app messages. Realtime delivery supplements REST; history remains API-backed. Email is attempted only when the recipient opted in and server SMTP/Brevo is enabled; provider acceptance does not confirm inbox delivery. Automated ML risk-alert email remains disabled. Test emails only reach EMAIL_TEST_RECIPIENTS." actions={<Button variant="outline" disabled={!unread||busy} onClick={()=>void update("/notifications/read-all")}>Mark all read</Button>}/>
     <Card className="p-4 space-y-2">
       <h2 className="font-semibold">Email controls (server-side)</h2>
       {controlsError?<p role="alert" className="text-sm text-danger">{controlsError}</p>:null}
       {controls?<ul className="text-sm text-slate-700 space-y-1">
         <li>Policy approved: {controls.emailPolicyApproved?"yes":"no"}</li>
-        <li>SMTP enabled: {controls.smtpEnabled?"yes":"no"}</li>
+        <li>Transport enabled: {controls.smtpEnabled?"yes":"no"}{controls.emailProvider?` (${controls.emailProvider})`:""}</li>
         <li>Background worker: {controls.workerEnabled?"yes":"no"}{controls.workerAutoRetry?" (auto-retry on)":" (auto-retry off)"}</li>
         <li>Automated risk-alert email: {controls.automatedRiskAlertEmailEnabled?"yes":"disabled until university approval"}</li>
+        <li>Test email: {controls.testEmailEnabled?"enabled":"disabled"} · allowlisted recipients: {controls.testRecipientCount??0}</li>
+        {controls.testRecipientsMasked?.length?<li>Allowlist (masked): {controls.testRecipientsMasked.join(", ")}</li>:null}
         <li className="text-slate-500">{controls.disclaimer}</li>
       </ul>:<p className="text-sm text-slate-600">Loading controls…</p>}
+    </Card>
+    <Card className="p-4 space-y-3">
+      <h2 className="font-semibold">Controlled test email</h2>
+      <p className="text-sm text-slate-600">Sends only to emails listed in server EMAIL_TEST_RECIPIENTS. Never use this for synthetic risk alerts to students.</p>
+      <form className="grid gap-3 sm:grid-cols-2" onSubmit={(event)=>void sendTestEmail(event)}>
+        <Input label="Allowlisted recipient email" type="email" value={testTo} required onChange={(event)=>setTestTo(event.target.value)}/>
+        <Input label="Subject" value={testSubject} maxLength={180} required onChange={(event)=>setTestSubject(event.target.value)}/>
+        <label className="text-sm font-medium text-slate-700 sm:col-span-2">Message<textarea className="mt-1 min-h-24 w-full rounded-md border border-slate-300 px-3 py-2 text-sm" value={testMessage} maxLength={1000} required onChange={(event)=>setTestMessage(event.target.value)}/></label>
+        <div className="sm:col-span-2"><Button type="submit" disabled={busy||!controls?.testEmailEnabled||!testTo.trim()}>{busy?"Sending…":"Send test email"}</Button></div>
+      </form>
     </Card>
     <Card className="p-4"><h2 className="mb-3 font-semibold">Send a manual message</h2><form className="grid gap-3 sm:grid-cols-2" onSubmit={(event)=>void send(event)}>
       {usersLoading?<p className="text-sm">Loading recipients…</p>:usersError?<div role="alert" className="sm:col-span-2"><ErrorState description={usersError} onRetry={()=>void reloadUsers()}/></div>:<Select label="Recipient" value={recipientId} onChange={(event)=>setRecipientId(event.target.value)} required options={[{label:"Select a recipient",value:""},...users.filter((user)=>user.status==="ACTIVE").map((user)=>({label:`${user.name} · ${user.role} · ${user.email}`,value:user.id}))]}/>}

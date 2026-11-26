@@ -19,22 +19,20 @@ export function Header({
   unreadOverride?: number;
 }) {
   const pathname = usePathname();
-  const [unread, setUnread] = useState(0);
+  const [fetchedUnread, setFetchedUnread] = useState(0);
+  const unread = typeof unreadOverride === "number" ? unreadOverride : fetchedUnread;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (typeof unreadOverride === "number") {
-      setUnread(unreadOverride);
-      return;
-    }
+    if (typeof unreadOverride === "number") return;
     let active = true;
     void apiGet<unknown[]>("/notifications?unread=true&page=1&pageSize=1")
       .then((result) => {
-        if (active) setUnread(result.meta?.total ?? result.data.length);
+        if (active) setFetchedUnread(result.meta?.total ?? result.data.length);
       })
       .catch(() => {
-        if (active) setUnread(0);
+        if (active) setFetchedUnread(0);
       });
     return () => {
       active = false;
