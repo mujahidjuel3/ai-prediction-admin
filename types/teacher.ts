@@ -26,6 +26,7 @@ export interface TeacherProfileProvisioningFields {
 }
 
 export type TeacherAccountProvisioning =
+  | { accountMode: "PROFILE"; email?: string }
   | { accountMode: "CREATE"; email: string; initialPassword: string }
   | { accountMode: "LINK"; userId: string };
 

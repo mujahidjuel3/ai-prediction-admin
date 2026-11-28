@@ -46,6 +46,7 @@ export interface StudentProfileProvisioningFields {
 }
 
 export type StudentAccountProvisioning =
+  | { accountMode: "PROFILE"; email?: string }
   | { accountMode: "CREATE"; email: string; initialPassword: string }
   | { accountMode: "LINK"; userId: string };
 

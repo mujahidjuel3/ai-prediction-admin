@@ -26,6 +26,18 @@ let csrfLoading: Promise<string> | undefined;
 let refreshing: Promise<boolean> | undefined;
 export function invalidateCsrfToken() { csrfToken = undefined; }
 
+/** Prefer the readable csrf_token cookie so the header matches what the API just rotated (login/refresh). */
+function csrfFromDocumentCookie(): string | undefined {
+  if (typeof document === "undefined") return undefined;
+  const raw = document.cookie.split("; ").find((part) => part.startsWith("csrf_token="))?.slice("csrf_token=".length);
+  if (!raw) return undefined;
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
 async function loadCsrfToken(): Promise<string> {
   if (!API_BASE_URL) throw new ApiError("API base URL is not configured.", 0);
   if (!csrfLoading) {
@@ -47,6 +59,11 @@ async function loadCsrfToken(): Promise<string> {
 }
 
 async function csrf(): Promise<string> {
+  const fromCookie = csrfFromDocumentCookie();
+  if (fromCookie) {
+    csrfToken = fromCookie;
+    return fromCookie;
+  }
   return csrfToken ?? loadCsrfToken();
 }
 
@@ -62,6 +79,8 @@ async function refreshSession(): Promise<boolean> {
       try {
         const url = apiUrl("/auth/refresh");
         const response = await fetch(url, { method: "POST", credentials: "include", cache: "no-store" });
+        // Refresh rotates csrf_token cookie; drop any stale in-memory copy.
+        invalidateCsrfToken();
         return response.ok;
       } catch {
         return false;

@@ -20,16 +20,19 @@ import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "re
 import type { SortDirection } from "@/types/common";
 import type { LinkableAccount } from "@/types/user";
 
-export interface CrudField<T = ApiRecord> { name: string; label: string; type?: "text" | "email" | "number" | "password" | "select"; options?: { label: string; value: string }[]; required?: boolean; requiredWhen?: { field: string; value: string }; visibleWhen?: { field: string; value: string }; hint?: string; min?: number; max?: number; step?: number; minLength?: number; maxLength?: number; createOnly?: boolean; editOnly?: boolean; value?: (row: T) => string; }
+export interface CrudField<T = ApiRecord> { name: string; label: string; type?: "text" | "email" | "number" | "password" | "select"; options?: { label: string; value: string }[]; required?: boolean; requiredWhen?: { field: string; value: string }; visibleWhen?: { field: string; value: string }; hint?: string; min?: number; max?: number; step?: number; minLength?: number; maxLength?: number; createOnly?: boolean; editOnly?: boolean; defaultValue?: string; value?: (row: T) => string; }
 export interface CrudColumn<T> { label: string; value: (row: T) => ReactNode; sortValue?: (row: T) => string | number | null; }
 interface ApiRecord { id: string; }
 interface AccountLinkConfig<T> { endpointFor: (row: T) => string; users: LinkableAccount[]; linked: (row: T) => boolean; roleLabel: string; }
 
-export function ApiCrudView<T extends ApiRecord>({ title, description, endpoint, writeEndpoint = endpoint, fields, columns, makePayload, deactivate = false, reactivate = false, accountLink }: {
+export function ApiCrudView<T extends ApiRecord>({ title, description, endpoint, writeEndpoint = endpoint, fields, columns, makePayload, deactivate = false, reactivate = false, accountLink, refreshToken = 0 }: {
   title: string; description: string; endpoint: string; writeEndpoint?: string; fields: CrudField<T>[]; columns: CrudColumn<T>[];
   makePayload?: (values: Record<string, string>, editing: boolean) => unknown; deactivate?: boolean; reactivate?: boolean; accountLink?: AccountLinkConfig<T>;
+  /** Increment to force a list reload (for example after CSV import). */
+  refreshToken?: number;
 }) {
   const { items, loading, error, reload } = useApiList<T>(endpoint);
+  useEffect(() => { if (refreshToken > 0) void reload(); }, [refreshToken, reload]);
   const [editing, setEditing] = useState<T | null>(null);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -62,7 +65,7 @@ export function ApiCrudView<T extends ApiRecord>({ title, description, endpoint,
     setSortKey(column);
     setPage(1);
   }
-  function begin(row?: T) { setEditing(row ?? null); setFormError(""); setFieldErrors({}); setMessage(""); setValues(Object.fromEntries(fields.map((field) => [field.name, row ? (field.value ? field.value(row) : String((row as Record<string, unknown>)[field.name] ?? "")) : ""]))); setOpen(true); }
+  function begin(row?: T) { setEditing(row ?? null); setFormError(""); setFieldErrors({}); setMessage(""); setValues(Object.fromEntries(fields.map((field) => [field.name, row ? (field.value ? field.value(row) : String((row as Record<string, unknown>)[field.name] ?? "")) : (field.defaultValue ?? "")]))); setOpen(true); }
   async function save(event: FormEvent) { event.preventDefault(); if (busy) return; setBusy(true); setFormError(""); setFieldErrors({}); try {
     const activeFields = fields.filter((field) => (!field.createOnly || !editing) && (!field.editOnly || editing) && (!field.visibleWhen || values[field.visibleWhen.field] === field.visibleWhen.value));
     const missing = activeFields.find((field) => (field.required || (field.requiredWhen && values[field.requiredWhen.field] === field.requiredWhen.value)) && (!values[field.name] || !values[field.name].trim()));

@@ -1,6 +1,7 @@
 "use client";
 
 import { ApiCrudView, type CrudField, type CrudColumn } from "@/components/data/api-crud-view";
+import { StudentCsvImport } from "@/components/students/student-csv-import";
 import { Select } from "@/components/ui/select";
 import { apiQuery } from "@/lib/api";
 import { useApiList } from "@/lib/use-api-list";
@@ -14,12 +15,26 @@ interface Student { id: string; userId: string | null; studentNumber: string; na
 
 export function StudentsView({ initialQuery = "" }: { initialQuery?: string }) {
   const [statusFilter, setStatusFilter] = useState<"ACTIVE" | "INACTIVE" | "ALL">("ACTIVE");
+  const [refreshToken, setRefreshToken] = useState(0);
   const { items: departments } = useApiList<Department>("/departments");
   const { items: linkableUsers } = useApiList<LinkableAccount>("/users/linkable?role=STUDENT");
   const fields: CrudField<Student>[] = [
     { name: "studentNumber", label: "Student number", required: true, minLength: 2, maxLength: 64 },
     { name: "name", label: "Name", required: true, minLength: 2, maxLength: 160 },
-    { name: "accountMode", label: "Account setup", type: "select", required: true, createOnly: true, options: [{ label: "Create account (local development only)", value: "CREATE" }, { label: "Link existing account", value: "LINK" }] },
+    {
+      name: "accountMode",
+      label: "Account setup",
+      type: "select",
+      required: true,
+      createOnly: true,
+      defaultValue: "PROFILE",
+      options: [
+        { label: "Profile only (no login account)", value: "PROFILE" },
+        { label: "Link existing account", value: "LINK" },
+        { label: "Create account (local development only)", value: "CREATE" },
+      ],
+    },
+    { name: "profileEmailCreate", label: "Profile email (optional)", type: "email", createOnly: true, visibleWhen: { field: "accountMode", value: "PROFILE" }, hint: "Stored on the student profile. Login accounts are linked separately." },
     { name: "email", label: "Login email", type: "email", createOnly: true, visibleWhen: { field: "accountMode", value: "CREATE" }, requiredWhen: { field: "accountMode", value: "CREATE" }, hint: "New account password setup is available only for local development." },
     { name: "initialPassword", label: "Temporary setup password", type: "password", createOnly: true, visibleWhen: { field: "accountMode", value: "CREATE" }, requiredWhen: { field: "accountMode", value: "CREATE" }, minLength: 14, maxLength: 128, hint: "14–128 characters. Never returned or emailed; use a temporary local-development credential." },
     { name: "userId", label: "Active unlinked Student account", type: "select", createOnly: true, visibleWhen: { field: "accountMode", value: "LINK" }, requiredWhen: { field: "accountMode", value: "LINK" }, options: linkableUsers.map((user) => ({ label: `${user.name} · ${user.email}`, value: user.id })) },
@@ -41,7 +56,8 @@ export function StudentsView({ initialQuery = "" }: { initialQuery?: string }) {
     [initialQuery, statusFilter],
   );
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
+      <StudentCsvImport onCommitted={() => setRefreshToken((value) => value + 1)} />
       <Select
         label="Status filter"
         value={statusFilter}
@@ -54,15 +70,21 @@ export function StudentsView({ initialQuery = "" }: { initialQuery?: string }) {
       />
       <ApiCrudView
         title="Students"
-        description="Student profiles stay linked to an active Student-role account. Create, edit, deactivate, and reactivate profiles manually. CSV import remains available under Academic Records."
+        description="Create academic profiles without a login account (recommended in production), link an existing Student account, or use local-development password create. CSV import uses the same headers as the Student directory report."
         endpoint={endpoint}
         writeEndpoint="/students"
         fields={fields}
         columns={columns}
+        refreshToken={refreshToken}
         makePayload={(v, editing) => {
           if (editing) return { studentNumber: v.studentNumber.trim(), name: v.name.trim(), ...(v.profileEmail.trim() ? { email: v.profileEmail.trim() } : {}), departmentId: v.departmentId, enrollmentYear: Number(v.enrollmentYear) };
           const profile = { studentNumber: v.studentNumber.trim(), name: v.name.trim(), departmentId: v.departmentId, enrollmentYear: Number(v.enrollmentYear) };
-          const account = v.accountMode === "CREATE" ? { accountMode: "CREATE" as const, email: v.email.trim(), initialPassword: v.initialPassword } : { accountMode: "LINK" as const, userId: v.userId };
+          if (v.accountMode === "PROFILE") {
+            return { ...profile, accountMode: "PROFILE" as const, ...(v.profileEmailCreate.trim() ? { email: v.profileEmailCreate.trim() } : {}) } satisfies CreateStudentProfileRequest;
+          }
+          const account = v.accountMode === "CREATE"
+            ? { accountMode: "CREATE" as const, email: v.email.trim(), initialPassword: v.initialPassword }
+            : { accountMode: "LINK" as const, userId: v.userId };
           return { ...profile, ...account } satisfies CreateStudentProfileRequest;
         }}
         accountLink={{ endpointFor: (row) => `/students/${row.id}/link-account`, users: linkableUsers, linked: (row) => Boolean(row.userId), roleLabel: "Student" }}
